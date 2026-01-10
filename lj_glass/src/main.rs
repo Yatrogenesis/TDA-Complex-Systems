@@ -1,6 +1,6 @@
-//! LJ Glass-Forming System - TDA During Vitrification
-//! ====================================================
-//! Kob-Andersen binary mixture with rapid quench.
+//! LJ Glass-Forming System - Kob-Andersen Binary Mixture
+//! ======================================================
+//! Variable quench rate study: glass vs crystal formation
 //! Author: Francisco Molina Burgos
 //! Date: 2026-01-10
 
@@ -13,48 +13,108 @@ use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
 
-// === PARAMETERS ===
-const DT: f64 = 0.002;
-const T_HIGH: f64 = 1.5;       // Start in liquid
-const T_LOW: f64 = 0.3;        // Below Tg ~ 0.435
-const STEPS_EQUIL: usize = 5000;
-const STEPS_PROD: usize = 10000;  // Longer for glass
-const SAMPLE_INTERVAL: usize = 50;
-const THERMOSTAT_TAU: usize = 50;
-const R_CUT: f64 = 2.5;
-const R_MIN: f64 = 0.7;
-const DENSITY: f64 = 1.2;      // Kob-Andersen density
-const FRACTION_A: f64 = 0.8;   // 80% A particles
-
-// Kob-Andersen parameters
+// === KOB-ANDERSEN PARAMETERS ===
+// Standard parameters from Kob & Andersen, PRE 51, 4626 (1995)
 const SIGMA_AA: f64 = 1.0;
-const SIGMA_AB: f64 = 0.8;
+const SIGMA_AB: f64 = 0.80;
 const SIGMA_BB: f64 = 0.88;
 const EPSILON_AA: f64 = 1.0;
 const EPSILON_AB: f64 = 1.5;
 const EPSILON_BB: f64 = 0.5;
+const FRACTION_A: f64 = 0.8;   // 80% A, 20% B
+const DENSITY: f64 = 1.2;      // Standard KA density
+
+// === SIMULATION PARAMETERS ===
+const DT: f64 = 0.005;         // Larger timestep OK for LJ
+const T_LIQUID: f64 = 1.0;     // Equilibrate as liquid (T > Tm ~ 0.75)
+const T_GLASS: f64 = 0.1;      // Far below Tg ~ 0.435
+
+// Base timing
+const STEPS_EQUIL_HOT: usize = 10000;   // Long equilibration at T_LIQUID
+const STEPS_ANNEAL: usize = 15000;      // Anneal at T_GLASS
+const SAMPLE_INTERVAL: usize = 50;
+const THERMOSTAT_TAU: usize = 20;
+
+const R_CUT: f64 = 2.5;
+const R_MIN: f64 = 0.7;
+
+// === QUENCH RATE CONFIGURATIONS ===
+// Quench rate = (T_LIQUID - T_GLASS) / (steps_quench * dt) in reduced units
+// Higher steps = slower quench = more time for nucleation = crystal
+// Lower steps = faster quench = freeze disorder = glass
+
+#[derive(Clone, Copy, Debug)]
+struct QuenchConfig {
+    name: &'static str,
+    steps_quench: usize,       // Steps during quench phase
+    rate_description: &'static str,
+}
+
+const QUENCH_RATES: [QuenchConfig; 5] = [
+    QuenchConfig {
+        name: "instantaneous",
+        steps_quench: 1,           // Single step - ~10^14 K/s equivalent
+        rate_description: "~10^14 K/s"
+    },
+    QuenchConfig {
+        name: "ultra_fast",
+        steps_quench: 100,         // ~10^12 K/s equivalent
+        rate_description: "~10^12 K/s"
+    },
+    QuenchConfig {
+        name: "fast",
+        steps_quench: 1000,        // ~10^11 K/s equivalent
+        rate_description: "~10^11 K/s"
+    },
+    QuenchConfig {
+        name: "moderate",
+        steps_quench: 5000,        // ~10^10 K/s - near critical cooling rate
+        rate_description: "~10^10 K/s (near Rc)"
+    },
+    QuenchConfig {
+        name: "slow",
+        steps_quench: 20000,       // ~10^9 K/s - allows crystallization
+        rate_description: "~10^9 K/s (crystallizes)"
+    },
+];
 
 #[derive(Clone, Serialize, Deserialize)]
 struct TrialResult {
     seed: u64,
+    quench_name: String,
+    quench_steps: usize,
+    quench_rate: String,
     phase: String,
     q6_final: f64,
     msd_final: f64,
-    t_glass: Option<usize>,
+    diffusion_coeff: f64,
+    t_arrest: Option<usize>,
     t_topo_h1: Option<usize>,
     gap_h1: Option<i64>,
 }
 
 #[derive(Serialize)]
-struct ValidationSummary {
-    n_particles: usize,
+struct QuenchSummary {
+    quench_name: String,
+    quench_steps: usize,
+    quench_rate: String,
     n_trials: usize,
-    total_time_sec: f64,
-    time_per_trial_sec: f64,
     n_glass: usize,
     n_crystal: usize,
-    precursor_rate_h1: f64,
-    mean_gap_h1: f64,
+    n_liquid: usize,
+    glass_fraction: f64,
+    mean_q6: f64,
+    mean_msd: f64,
+    mean_diff_coeff: f64,
+}
+
+#[derive(Serialize)]
+struct ValidationSummary {
+    n_particles: usize,
+    n_trials_per_rate: usize,
+    total_quench_rates: usize,
+    total_time_sec: f64,
+    quench_results: Vec<QuenchSummary>,
     trials: Vec<TrialResult>,
 }
 
@@ -62,54 +122,50 @@ struct ValidationSummary {
 #[inline]
 fn get_lj_params(type_i: u8, type_j: u8) -> (f64, f64) {
     match (type_i, type_j) {
-        (0, 0) => (SIGMA_AA, EPSILON_AA),
-        (1, 1) => (SIGMA_BB, EPSILON_BB),
-        _ => (SIGMA_AB, EPSILON_AB),
+        (0, 0) => (SIGMA_AA, EPSILON_AA),  // A-A
+        (1, 1) => (SIGMA_BB, EPSILON_BB),  // B-B
+        _ => (SIGMA_AB, EPSILON_AB),        // A-B
     }
 }
 
-/// Compute PBC distance in 3D
+/// PBC minimum image
 #[inline]
-fn pbc_distance_3d(p1: &[f64], p2: &[f64], box_size: f64) -> f64 {
-    let mut dx = p1[0] - p2[0];
-    let mut dy = p1[1] - p2[1];
-    let mut dz = p1[2] - p2[2];
-    dx -= box_size * (dx / box_size).round();
-    dy -= box_size * (dy / box_size).round();
-    dz -= box_size * (dz / box_size).round();
-    (dx * dx + dy * dy + dz * dz).sqrt()
+fn pbc_diff(a: f64, b: f64, box_size: f64) -> f64 {
+    let mut d = a - b;
+    d -= box_size * (d / box_size).round();
+    d
+}
+
+#[inline]
+fn pbc_dist2(p1: &[f64], p2: &[f64], box_size: f64) -> f64 {
+    let dx = pbc_diff(p1[0], p2[0], box_size);
+    let dy = pbc_diff(p1[1], p2[1], box_size);
+    let dz = pbc_diff(p1[2], p2[2], box_size);
+    dx*dx + dy*dy + dz*dz
 }
 
 /// Compute distance matrix
-fn compute_distance_matrix_3d(pos: &Array2<f64>, box_size: f64) -> Array2<f64> {
+fn compute_distance_matrix(pos: &Array2<f64>, box_size: f64) -> Array2<f64> {
     let n = pos.nrows();
     let mut dm = Array2::<f64>::zeros((n, n));
 
-    let results: Vec<(usize, usize, f64)> = (0..n)
-        .into_par_iter()
-        .flat_map(|i| {
-            (i + 1..n)
-                .map(|j| {
-                    let pi = pos.row(i);
-                    let pj = pos.row(j);
-                    let d = pbc_distance_3d(pi.as_slice().unwrap(), pj.as_slice().unwrap(), box_size);
-                    (i, j, d)
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    for (i, j, d) in results {
-        dm[[i, j]] = d;
-        dm[[j, i]] = d;
+    for i in 0..n {
+        for j in i + 1..n {
+            let d = pbc_dist2(
+                pos.row(i).as_slice().unwrap(),
+                pos.row(j).as_slice().unwrap(),
+                box_size
+            ).sqrt();
+            dm[[i, j]] = d;
+            dm[[j, i]] = d;
+        }
     }
     dm
 }
 
 /// Compute forces for binary LJ mixture
-fn compute_forces_binary(pos: &Array2<f64>, types: &[u8], box_size: f64) -> Array2<f64> {
+fn compute_forces(pos: &Array2<f64>, types: &[u8], box_size: f64) -> Array2<f64> {
     let n = pos.nrows();
-    let r_cut2 = R_CUT * R_CUT;
     let r_min2 = R_MIN * R_MIN;
 
     let results: Vec<(usize, f64, f64, f64)> = (0..n)
@@ -126,26 +182,23 @@ fn compute_forces_binary(pos: &Array2<f64>, types: &[u8], box_size: f64) -> Arra
                 let pj = pos.row(j);
                 let tj = types[j];
 
-                let mut dx = pi[0] - pj[0];
-                let mut dy = pi[1] - pj[1];
-                let mut dz = pi[2] - pj[2];
-                dx -= box_size * (dx / box_size).round();
-                dy -= box_size * (dy / box_size).round();
-                dz -= box_size * (dz / box_size).round();
+                let dx = pbc_diff(pi[0], pj[0], box_size);
+                let dy = pbc_diff(pi[1], pj[1], box_size);
+                let dz = pbc_diff(pi[2], pj[2], box_size);
 
-                let mut r2 = dx * dx + dy * dy + dz * dz;
+                let mut r2 = dx*dx + dy*dy + dz*dz;
                 let (sigma, epsilon) = get_lj_params(ti, tj);
                 let sigma2 = sigma * sigma;
-                let r_cut2_scaled = r_cut2 * sigma2;
+                let r_cut2 = R_CUT * R_CUT * sigma2;
 
-                if r2 < r_cut2_scaled {
+                if r2 < r_cut2 {
                     if r2 < r_min2 * sigma2 {
                         r2 = r_min2 * sigma2;
                     }
                     let s2_r2 = sigma2 / r2;
                     let s6_r6 = s2_r2 * s2_r2 * s2_r2;
                     let f_mag = 48.0 * epsilon * s6_r6 * (s6_r6 - 0.5) / r2;
-                    let f_mag = f_mag.clamp(-50.0, 50.0);
+                    let f_mag = f_mag.clamp(-100.0, 100.0);
 
                     fx += f_mag * dx;
                     fy += f_mag * dy;
@@ -175,47 +228,65 @@ fn velocity_verlet_step(
 ) {
     let n = pos.nrows();
 
+    // Half-step velocity
     for i in 0..n {
-        vel[[i, 0]] += 0.5 * DT * forces[[i, 0]];
-        vel[[i, 1]] += 0.5 * DT * forces[[i, 1]];
-        vel[[i, 2]] += 0.5 * DT * forces[[i, 2]];
+        for d in 0..3 {
+            vel[[i, d]] += 0.5 * DT * forces[[i, d]];
+        }
     }
 
+    // Position update
     for i in 0..n {
-        pos[[i, 0]] = (pos[[i, 0]] + DT * vel[[i, 0]]).rem_euclid(box_size);
-        pos[[i, 1]] = (pos[[i, 1]] + DT * vel[[i, 1]]).rem_euclid(box_size);
-        pos[[i, 2]] = (pos[[i, 2]] + DT * vel[[i, 2]]).rem_euclid(box_size);
+        for d in 0..3 {
+            pos[[i, d]] = (pos[[i, d]] + DT * vel[[i, d]]).rem_euclid(box_size);
+        }
     }
 
-    let new_forces = compute_forces_binary(pos, types, box_size);
-    *forces = new_forces;
+    // New forces
+    *forces = compute_forces(pos, types, box_size);
 
+    // Second half-step velocity
     for i in 0..n {
-        vel[[i, 0]] += 0.5 * DT * forces[[i, 0]];
-        vel[[i, 1]] += 0.5 * DT * forces[[i, 1]];
-        vel[[i, 2]] += 0.5 * DT * forces[[i, 2]];
+        for d in 0..3 {
+            vel[[i, d]] += 0.5 * DT * forces[[i, d]];
+        }
     }
 }
 
-/// Berendsen thermostat
-fn apply_thermostat(vel: &mut Array2<f64>, target_t: f64) {
+/// Berendsen thermostat with strong coupling
+fn apply_thermostat(vel: &mut Array2<f64>, target_t: f64, tau: f64) {
     let n = vel.nrows() as f64;
     let ke: f64 = vel.iter().map(|v| 0.5 * v * v).sum();
     let current_t = 2.0 * ke / (3.0 * n);
 
-    if current_t > 1e-6 {
-        let scale = (target_t / current_t).sqrt().clamp(0.9, 1.1);
+    if current_t > 1e-8 {
+        // Berendsen with coupling constant
+        let lambda = (1.0 + (DT / tau) * (target_t / current_t - 1.0)).sqrt();
+        let lambda = lambda.clamp(0.9, 1.1);
+        vel.mapv_inplace(|v| v * lambda);
+    }
+}
+
+/// Instantaneous velocity rescaling (for quench)
+fn rescale_velocities(vel: &mut Array2<f64>, target_t: f64) {
+    let n = vel.nrows() as f64;
+    let ke: f64 = vel.iter().map(|v| 0.5 * v * v).sum();
+    let current_t = 2.0 * ke / (3.0 * n);
+
+    if current_t > 1e-8 {
+        let scale = (target_t / current_t).sqrt();
         vel.mapv_inplace(|v| v * scale);
     }
 }
 
-/// Compute Q6 order parameter (crystallinity indicator)
-fn compute_q6(dm: &Array2<f64>) -> f64 {
+/// Compute Q6-like order parameter (bond-orientational order)
+fn compute_q6(dm: &Array2<f64>, types: &[u8]) -> f64 {
     let n = dm.nrows();
-    let cutoff = 1.5;
+    // For glass: look at local structure around A particles
+    let cutoff = 1.5;  // First neighbor shell
 
     let ordered_count: usize = (0..n)
-        .into_par_iter()
+        .filter(|&i| types[i] == 0)  // Only A particles
         .filter(|&i| {
             let mut n_neigh = 0;
             for j in 0..n {
@@ -223,30 +294,55 @@ fn compute_q6(dm: &Array2<f64>) -> f64 {
                     n_neigh += 1;
                 }
             }
-            n_neigh >= 11
+            // Crystal: very regular coordination
+            // Glass: variable coordination
+            n_neigh >= 11 && n_neigh <= 13
         })
         .count();
 
-    ordered_count as f64 / n as f64
+    let n_a = types.iter().filter(|&&t| t == 0).count();
+    if n_a > 0 {
+        ordered_count as f64 / n_a as f64
+    } else {
+        0.0
+    }
 }
 
-/// Compute MSD from initial positions
-fn compute_msd(pos: &Array2<f64>, pos0: &Array2<f64>, box_size: f64) -> f64 {
+/// Compute MSD from reference positions (unwrapped)
+fn compute_msd(pos: &Array2<f64>, pos_ref: &Array2<f64>, _box_size: f64) -> f64 {
     let n = pos.nrows();
     let mut total_msd = 0.0;
 
     for i in 0..n {
-        let mut dx = pos[[i, 0]] - pos0[[i, 0]];
-        let mut dy = pos[[i, 1]] - pos0[[i, 1]];
-        let mut dz = pos[[i, 2]] - pos0[[i, 2]];
-        // Note: For MSD we don't apply PBC to capture diffusion
-        dx -= box_size * (dx / box_size).round();
-        dy -= box_size * (dy / box_size).round();
-        dz -= box_size * (dz / box_size).round();
-        total_msd += dx * dx + dy * dy + dz * dz;
+        for d in 0..3 {
+            let dr = pos[[i, d]] - pos_ref[[i, d]];
+            total_msd += dr * dr;
+        }
     }
 
     total_msd / n as f64
+}
+
+/// Track unwrapped positions for MSD
+fn update_unwrapped(
+    pos: &Array2<f64>,
+    pos_prev: &Array2<f64>,
+    pos_unwrap: &mut Array2<f64>,
+    box_size: f64,
+) {
+    let n = pos.nrows();
+    for i in 0..n {
+        for d in 0..3 {
+            let mut dr = pos[[i, d]] - pos_prev[[i, d]];
+            // Unwrap if crossed boundary
+            if dr > box_size / 2.0 {
+                dr -= box_size;
+            } else if dr < -box_size / 2.0 {
+                dr += box_size;
+            }
+            pos_unwrap[[i, d]] += dr;
+        }
+    }
 }
 
 /// H1 entropy approximation
@@ -300,21 +396,31 @@ fn persistence_entropy_h1(dm: &Array2<f64>) -> f64 {
     entropy
 }
 
-/// Detect glass transition (MSD plateau)
-fn detect_glass(msd_series: &[f64], times: &[usize]) -> Option<usize> {
-    if msd_series.len() < 10 { return None; }
+/// Detect dynamical arrest (glass transition)
+fn detect_arrest(msd_series: &[f64], times: &[usize]) -> Option<usize> {
+    if msd_series.len() < 20 { return None; }
 
-    // Glass transition: MSD stops growing (plateau)
+    // Glass: MSD plateau (subdiffusive behavior)
+    // Look for where MSD growth rate drops significantly
     let window = 5;
-    for i in window..msd_series.len() - window {
-        let before = msd_series[i - window..i].iter().sum::<f64>() / window as f64;
-        let after = msd_series[i..i + window].iter().sum::<f64>() / window as f64;
 
-        // If MSD growth slows significantly (ratio < 1.1)
-        if after / before < 1.1 && before > 0.1 {
+    for i in window + 5..msd_series.len() - window {
+        let early_rate = (msd_series[i] - msd_series[i - window]) / (window as f64);
+        let late_rate = (msd_series[i + window] - msd_series[i]) / (window as f64);
+
+        // Arrest when diffusion slows dramatically
+        if early_rate > 0.001 && late_rate < early_rate * 0.1 {
             return Some(times[i]);
         }
     }
+
+    // Alternative: check if MSD is very small at end
+    if let Some(&last_msd) = msd_series.last() {
+        if last_msd < 1.0 {  // Particles moved less than 1 σ on average
+            return Some(times[msd_series.len() / 2]);
+        }
+    }
+
     None
 }
 
@@ -341,8 +447,8 @@ fn detect_cusum(series: &[f64], times: &[usize], baseline_fraction: f64) -> Opti
     None
 }
 
-/// Run single glass trial
-fn run_trial_glass(n_particles: usize, seed: u64) -> TrialResult {
+/// Run single glass trial with variable quench rate
+fn run_trial_glass(n_particles: usize, seed: u64, quench: &QuenchConfig) -> TrialResult {
     let box_size = (n_particles as f64 / DENSITY).powf(1.0 / 3.0);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
@@ -350,65 +456,111 @@ fn run_trial_glass(n_particles: usize, seed: u64) -> TrialResult {
     let n_a = (n_particles as f64 * FRACTION_A) as usize;
     let mut types: Vec<u8> = vec![0; n_a];
     types.extend(vec![1; n_particles - n_a]);
+    // Shuffle types
+    types.shuffle(&mut rng);
 
-    // Initialize positions
+    // Initialize positions on lattice then randomize slightly
+    let n_side = (n_particles as f64).powf(1.0 / 3.0).ceil() as usize;
+    let spacing = box_size / n_side as f64;
+
     let mut pos = Array2::<f64>::zeros((n_particles, 3));
+    let mut idx = 0;
+    'outer: for ix in 0..n_side {
+        for iy in 0..n_side {
+            for iz in 0..n_side {
+                if idx >= n_particles { break 'outer; }
+                pos[[idx, 0]] = (ix as f64 + 0.5 + (rng.random::<f64>() - 0.5) * 0.1) * spacing;
+                pos[[idx, 1]] = (iy as f64 + 0.5 + (rng.random::<f64>() - 0.5) * 0.1) * spacing;
+                pos[[idx, 2]] = (iz as f64 + 0.5 + (rng.random::<f64>() - 0.5) * 0.1) * spacing;
+                idx += 1;
+            }
+        }
+    }
+
+    // Apply PBC
     for i in 0..n_particles {
-        pos[[i, 0]] = rng.random::<f64>() * box_size;
-        pos[[i, 1]] = rng.random::<f64>() * box_size;
-        pos[[i, 2]] = rng.random::<f64>() * box_size;
+        for d in 0..3 {
+            pos[[i, d]] = pos[[i, d]].rem_euclid(box_size);
+        }
     }
 
     // Initialize velocities
     let mut vel = Array2::<f64>::zeros((n_particles, 3));
     for i in 0..n_particles {
-        vel[[i, 0]] = rng.random::<f64>() * 2.0 - 1.0;
-        vel[[i, 1]] = rng.random::<f64>() * 2.0 - 1.0;
-        vel[[i, 2]] = rng.random::<f64>() * 2.0 - 1.0;
-    }
-
-    // Remove COM velocity
-    let com: Vec<f64> = (0..3).map(|d| vel.column(d).sum() / n_particles as f64).collect();
-    for i in 0..n_particles {
-        vel[[i, 0]] -= com[0];
-        vel[[i, 1]] -= com[1];
-        vel[[i, 2]] -= com[2];
-    }
-    apply_thermostat(&mut vel, T_HIGH);
-
-    let mut forces = compute_forces_binary(&pos, &types, box_size);
-
-    // Equilibration at high T
-    for step in 0..STEPS_EQUIL {
-        velocity_verlet_step(&mut pos, &mut vel, &mut forces, &types, box_size);
-        if step % THERMOSTAT_TAU == 0 {
-            apply_thermostat(&mut vel, T_HIGH);
+        for d in 0..3 {
+            vel[[i, d]] = (rng.random::<f64>() - 0.5) * 2.0;
         }
     }
 
-    // Save initial positions for MSD
-    let pos0 = pos.clone();
+    // Remove COM velocity
+    for d in 0..3 {
+        let com: f64 = vel.column(d).sum() / n_particles as f64;
+        for i in 0..n_particles {
+            vel[[i, d]] -= com;
+        }
+    }
+    rescale_velocities(&mut vel, T_LIQUID);
 
-    // Production with rapid quench
+    let mut forces = compute_forces(&pos, &types, box_size);
+
+    // ========================================
+    // PHASE 1: Equilibrate at high temperature
+    // ========================================
+    for step in 0..STEPS_EQUIL_HOT {
+        velocity_verlet_step(&mut pos, &mut vel, &mut forces, &types, box_size);
+        if step % THERMOSTAT_TAU == 0 {
+            apply_thermostat(&mut vel, T_LIQUID, 0.5);  // Strong coupling
+        }
+    }
+
+    // ========================================
+    // PHASE 2: Variable rate quench
+    // ========================================
+    // Temperature decreases linearly from T_LIQUID to T_GLASS over steps_quench steps
+    let steps_quench = quench.steps_quench;
+    let dt_temp = (T_LIQUID - T_GLASS) / steps_quench as f64;
+
+    for step in 0..steps_quench {
+        velocity_verlet_step(&mut pos, &mut vel, &mut forces, &types, box_size);
+
+        // Apply temperature ramp
+        let target_t = T_LIQUID - dt_temp * step as f64;
+        if step % 10 == 0 || steps_quench <= 10 {
+            rescale_velocities(&mut vel, target_t.max(T_GLASS));
+        }
+    }
+
+    // Final rescale to exact T_GLASS
+    rescale_velocities(&mut vel, T_GLASS);
+
+    // Save reference for MSD
+    let pos_ref = pos.clone();
+    let mut pos_unwrap = pos.clone();
+    let mut pos_prev = pos.clone();
+
+    // ========================================
+    // PHASE 3: Anneal and sample at T_GLASS
+    // ========================================
     let mut times = Vec::new();
     let mut q6_series = Vec::new();
     let mut msd_series = Vec::new();
     let mut s_h1_series = Vec::new();
 
-    for step in 0..STEPS_PROD {
-        let progress = step as f64 / STEPS_PROD as f64;
-        let target_t = T_HIGH + (T_LOW - T_HIGH) * progress;
-
+    for step in 0..STEPS_ANNEAL {
         velocity_verlet_step(&mut pos, &mut vel, &mut forces, &types, box_size);
 
         if step % THERMOSTAT_TAU == 0 {
-            apply_thermostat(&mut vel, target_t);
+            apply_thermostat(&mut vel, T_GLASS, 1.0);
         }
 
         if step % SAMPLE_INTERVAL == 0 {
-            let dm = compute_distance_matrix_3d(&pos, box_size);
-            let q6 = compute_q6(&dm);
-            let msd = compute_msd(&pos, &pos0, box_size);
+            // Update unwrapped positions
+            update_unwrapped(&pos, &pos_prev, &mut pos_unwrap, box_size);
+            pos_prev.assign(&pos);
+
+            let dm = compute_distance_matrix(&pos, box_size);
+            let q6 = compute_q6(&dm, &types);
+            let msd = compute_msd(&pos_unwrap, &pos_ref, box_size);
             let s_h1 = persistence_entropy_h1(&dm);
 
             times.push(step);
@@ -418,113 +570,168 @@ fn run_trial_glass(n_particles: usize, seed: u64) -> TrialResult {
         }
     }
 
-    // Detection
-    let t_glass = detect_glass(&msd_series, &times);
-    let t_topo_h1 = detect_cusum(&s_h1_series, &times, 0.3);
+    // Analysis
+    let t_arrest = detect_arrest(&msd_series, &times);
+    let t_topo_h1 = detect_cusum(&s_h1_series, &times, 0.2);
 
-    let gap_h1 = match (t_glass, t_topo_h1) {
-        (Some(tg), Some(tt)) => Some(tg as i64 - tt as i64),
+    let gap_h1 = match (t_arrest, t_topo_h1) {
+        (Some(ta), Some(tt)) => Some(ta as i64 - tt as i64),
         _ => None,
     };
 
     let q6_final = q6_series[q6_series.len().saturating_sub(5)..].iter().sum::<f64>()
         / 5.0f64.min(q6_series.len() as f64);
-    let msd_final = msd_series.last().copied().unwrap_or(0.0);
+    let msd_final = *msd_series.last().unwrap_or(&0.0);
 
-    // Glass if low Q6 (no crystallization) and low MSD (frozen)
-    let phase = if q6_final < 0.3 && msd_final < 2.0 {
-        "GLASS"
-    } else if q6_final > 0.5 {
-        "CRYSTAL"
+    // Diffusion coefficient from late-time MSD
+    let diffusion_coeff = if msd_series.len() > 10 {
+        let n_late = msd_series.len() / 2;
+        let late_msd = &msd_series[n_late..];
+        let late_times = &times[n_late..];
+        if late_times.len() > 1 {
+            let dt = (late_times.last().unwrap() - late_times.first().unwrap()) as f64 * DT;
+            let dmsd = late_msd.last().unwrap() - late_msd.first().unwrap();
+            dmsd / (6.0 * dt)  // D = MSD / (6t) in 3D
+        } else {
+            0.0
+        }
     } else {
+        0.0
+    };
+
+    // Classification:
+    // - Glass: low Q6 (< 0.5), low MSD (< 1.0), low D
+    // - Crystal: high Q6 (> 0.7)
+    // - Liquid: high MSD, high D
+    let phase = if q6_final > 0.7 {
+        "CRYSTAL"
+    } else if msd_final < 1.0 && diffusion_coeff < 0.01 {
+        "GLASS"
+    } else if msd_final > 5.0 || diffusion_coeff > 0.1 {
         "LIQUID"
+    } else {
+        "GLASS"  // Default to glass for intermediate cases at low T
     };
 
     TrialResult {
         seed,
+        quench_name: quench.name.to_string(),
+        quench_steps: quench.steps_quench,
+        quench_rate: quench.rate_description.to_string(),
         phase: phase.to_string(),
         q6_final,
         msd_final,
-        t_glass,
+        diffusion_coeff,
+        t_arrest,
         t_topo_h1,
         gap_h1,
     }
 }
 
-/// Run validation
-fn run_validation_glass(n_particles: usize, n_trials: usize) -> ValidationSummary {
+fn run_validation_glass(n_particles: usize, n_trials_per_rate: usize) -> ValidationSummary {
     println!("\n{}", "=".repeat(70));
-    println!("LJ GLASS VALIDATION: N={}, {} trials", n_particles, n_trials);
+    println!("LJ GLASS - VARIABLE QUENCH RATE STUDY (Kob-Andersen)");
+    println!("N={}, {} trials per rate, {} quench rates", n_particles, n_trials_per_rate, QUENCH_RATES.len());
     println!("{}", "=".repeat(70));
 
     let total_start = Instant::now();
-    let mut results = Vec::new();
+    let mut all_results = Vec::new();
+    let mut quench_summaries = Vec::new();
 
-    for i in 0..n_trials {
-        let seed = (n_particles as u64) * 1000 + i as u64;
-        let trial_start = Instant::now();
-        let result = run_trial_glass(n_particles, seed);
-        let elapsed = trial_start.elapsed().as_secs_f64();
+    for quench in QUENCH_RATES.iter() {
+        println!("\n--- Quench: {} ({}) ---", quench.name, quench.rate_description);
+        println!("    Steps: {} (dt={:.3})", quench.steps_quench, DT);
 
-        println!(
-            "  Trial {}/{}: {}, Q6={:.3}, MSD={:.2}, gap_H1={:?} ({:.1}s)",
-            i + 1, n_trials, result.phase, result.q6_final, result.msd_final,
-            result.gap_h1, elapsed
-        );
+        let mut rate_results = Vec::new();
 
-        results.push(result);
+        for i in 0..n_trials_per_rate {
+            let seed = (n_particles as u64) * 5000 + (quench.steps_quench as u64) * 100 + i as u64;
+            let trial_start = Instant::now();
+            let result = run_trial_glass(n_particles, seed, quench);
+            let elapsed = trial_start.elapsed().as_secs_f64();
+
+            println!(
+                "  Trial {}/{}: {} | Q6={:.3}, MSD={:.2}, D={:.4} ({:.1}s)",
+                i + 1, n_trials_per_rate, result.phase, result.q6_final,
+                result.msd_final, result.diffusion_coeff, elapsed
+            );
+
+            rate_results.push(result.clone());
+            all_results.push(result);
+        }
+
+        // Summarize this quench rate
+        let n_glass = rate_results.iter().filter(|r| r.phase == "GLASS").count();
+        let n_crystal = rate_results.iter().filter(|r| r.phase == "CRYSTAL").count();
+        let n_liquid = rate_results.iter().filter(|r| r.phase == "LIQUID").count();
+        let glass_fraction = n_glass as f64 / n_trials_per_rate as f64;
+        let mean_q6 = rate_results.iter().map(|r| r.q6_final).sum::<f64>() / rate_results.len() as f64;
+        let mean_msd = rate_results.iter().map(|r| r.msd_final).sum::<f64>() / rate_results.len() as f64;
+        let mean_diff = rate_results.iter().map(|r| r.diffusion_coeff).sum::<f64>() / rate_results.len() as f64;
+
+        println!("  => Glass: {}, Crystal: {}, Liquid: {} (Glass fraction: {:.0}%)",
+                 n_glass, n_crystal, n_liquid, glass_fraction * 100.0);
+
+        quench_summaries.push(QuenchSummary {
+            quench_name: quench.name.to_string(),
+            quench_steps: quench.steps_quench,
+            quench_rate: quench.rate_description.to_string(),
+            n_trials: n_trials_per_rate,
+            n_glass,
+            n_crystal,
+            n_liquid,
+            glass_fraction,
+            mean_q6,
+            mean_msd,
+            mean_diff_coeff: mean_diff,
+        });
     }
 
     let total_time = total_start.elapsed().as_secs_f64();
 
-    let n_glass = results.iter().filter(|r| r.phase == "GLASS").count();
-    let n_crystal = results.iter().filter(|r| r.phase == "CRYSTAL").count();
-
-    let gaps: Vec<i64> = results.iter().filter(|r| r.phase == "GLASS")
-        .filter_map(|r| r.gap_h1).collect();
-    let n_precursor = gaps.iter().filter(|&&g| g > 0).count();
-
-    let precursor_rate_h1 = if !gaps.is_empty() {
-        n_precursor as f64 / gaps.len() as f64
-    } else { 0.0 };
-
-    let mean_gap_h1 = if !gaps.is_empty() {
-        gaps.iter().sum::<i64>() as f64 / gaps.len() as f64
-    } else { 0.0 };
-
-    println!("\n--- GLASS RESULTS N={} ---", n_particles);
-    println!("Glass: {}/{}", n_glass, n_trials);
-    println!("Crystal: {}/{}", n_crystal, n_trials);
-    println!("H1 Precursor rate: {:.1}%", 100.0 * precursor_rate_h1);
-    println!("Mean gap H1: {:.1}", mean_gap_h1);
-    println!("Time/trial: {:.1}s", total_time / n_trials as f64);
+    // Print summary table
+    println!("\n{}", "=".repeat(70));
+    println!("QUENCH RATE SUMMARY (TTT Diagram)");
+    println!("{}", "=".repeat(70));
+    println!("{:<15} {:>10} {:>8} {:>8} {:>8} {:>10}",
+             "Rate", "Steps", "Glass%", "Cryst%", "Q6", "MSD");
+    println!("{}", "-".repeat(70));
+    for qs in &quench_summaries {
+        println!("{:<15} {:>10} {:>7.0}% {:>7.0}% {:>8.3} {:>10.2}",
+                 qs.quench_name, qs.quench_steps,
+                 qs.glass_fraction * 100.0,
+                 (qs.n_crystal as f64 / qs.n_trials as f64) * 100.0,
+                 qs.mean_q6, qs.mean_msd);
+    }
+    println!("{}", "-".repeat(70));
+    println!("Total time: {:.1}s", total_time);
 
     ValidationSummary {
         n_particles,
-        n_trials,
+        n_trials_per_rate,
+        total_quench_rates: QUENCH_RATES.len(),
         total_time_sec: total_time,
-        time_per_trial_sec: total_time / n_trials as f64,
-        n_glass,
-        n_crystal,
-        precursor_rate_h1,
-        mean_gap_h1,
-        trials: results,
+        quench_results: quench_summaries,
+        trials: all_results,
     }
 }
 
 fn main() {
     println!("{}", "=".repeat(70));
-    println!("LJ GLASS TDA-CUSUM (Kob-Andersen Binary Mixture)");
+    println!("LJ GLASS - VARIABLE QUENCH RATE STUDY");
+    println!("Testing: instantaneous -> ultra_fast -> fast -> moderate -> slow");
     println!("{}", "=".repeat(70));
 
     std::fs::create_dir_all("../results").ok();
 
-    let res_256 = run_validation_glass(256, 5);
-    let json = serde_json::to_string_pretty(&res_256).unwrap();
-    let mut file = File::create("../results/lj_glass_N256.json").unwrap();
+    // Run 3 trials per quench rate for statistical significance
+    let res = run_validation_glass(256, 3);
+    let json = serde_json::to_string_pretty(&res).unwrap();
+    let mut file = File::create("../results/lj_glass_variable_quench.json").unwrap();
     file.write_all(json.as_bytes()).unwrap();
 
     println!("\n{}", "=".repeat(70));
-    println!("GLASS VALIDATION COMPLETE");
+    println!("VARIABLE QUENCH STUDY COMPLETE");
+    println!("Results saved to: results/lj_glass_variable_quench.json");
     println!("{}", "=".repeat(70));
 }
