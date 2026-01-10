@@ -1,0 +1,19 @@
+[package]
+name = "tip4p_tda"
+version = "0.1.0"
+edition = "2021"
+authors = ["Francisco Molina Burgos"]
+description = "TIP4P Water ice nucleation - TDA with H-bond topology"
+
+[dependencies]
+ndarray = { version = "0.16", features = ["rayon"] }
+rand = "0.9"
+rand_chacha = "0.9"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

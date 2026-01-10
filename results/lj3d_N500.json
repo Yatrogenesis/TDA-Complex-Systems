@@ -1,0 +1,43 @@
+{
+  "n_particles": 500,
+  "n_trials": 3,
+  "total_time_sec": 28.3466157,
+  "time_per_trial_sec": 9.4488719,
+  "n_crystal": 3,
+  "precursor_rate_h1": 0.0,
+  "precursor_rate_h2": 0.0,
+  "mean_gap_h1": -2010.0,
+  "mean_gap_h2": -2330.0,
+  "trials": [
+    {
+      "seed": 50000,
+      "phase": "CRYSTAL",
+      "q6_final": 0.9596,
+      "t_phys": 0,
+      "t_topo_h1": 1860,
+      "t_topo_h2": 2160,
+      "gap_h1": -1860,
+      "gap_h2": -2160
+    },
+    {
+      "seed": 50001,
+      "phase": "CRYSTAL",
+      "q6_final": 0.9452,
+      "t_phys": 0,
+      "t_topo_h1": 2100,
+      "t_topo_h2": 2610,
+      "gap_h1": -2100,
+      "gap_h2": -2610
+    },
+    {
+      "seed": 50002,
+      "phase": "CRYSTAL",
+      "q6_final": 0.944,
+      "t_phys": 0,
+      "t_topo_h1": 2070,
+      "t_topo_h2": 2220,
+      "gap_h1": -2070,
+      "gap_h2": -2220
+    }
+  ]
+}
