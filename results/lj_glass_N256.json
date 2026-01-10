@@ -1,0 +1,57 @@
+{
+  "n_particles": 256,
+  "n_trials": 5,
+  "total_time_sec": 24.4783316,
+  "time_per_trial_sec": 4.89566632,
+  "n_glass": 0,
+  "n_crystal": 5,
+  "precursor_rate_h1": 0.0,
+  "mean_gap_h1": 0.0,
+  "trials": [
+    {
+      "seed": 256000,
+      "phase": "CRYSTAL",
+      "q6_final": 0.9984375,
+      "msd_final": 2.2359106213519606,
+      "t_glass": 2050,
+      "t_topo_h1": 4300,
+      "gap_h1": -2250
+    },
+    {
+      "seed": 256001,
+      "phase": "CRYSTAL",
+      "q6_final": 1.0,
+      "msd_final": 2.1494545695167813,
+      "t_glass": 1750,
+      "t_topo_h1": 3100,
+      "gap_h1": -1350
+    },
+    {
+      "seed": 256002,
+      "phase": "CRYSTAL",
+      "q6_final": 0.99921875,
+      "msd_final": 2.160255482786817,
+      "t_glass": 1800,
+      "t_topo_h1": 3750,
+      "gap_h1": -1950
+    },
+    {
+      "seed": 256003,
+      "phase": "CRYSTAL",
+      "q6_final": 0.9984375,
+      "msd_final": 2.1960098040226805,
+      "t_glass": 1900,
+      "t_topo_h1": 3500,
+      "gap_h1": -1600
+    },
+    {
+      "seed": 256004,
+      "phase": "CRYSTAL",
+      "q6_final": 1.0,
+      "msd_final": 2.118627752954264,
+      "t_glass": 1800,
+      "t_topo_h1": 3050,
+      "gap_h1": -1250
+    }
+  ]
+}

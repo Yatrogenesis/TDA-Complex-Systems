@@ -1,0 +1,56 @@
+{
+  "n_molecules": 64,
+  "n_trials": 5,
+  "total_time_sec": 2.5620873,
+  "time_per_trial_sec": 0.51241746,
+  "n_ice": 0,
+  "precursor_rate_h1": 0.0,
+  "mean_gap_h1": 0.0,
+  "trials": [
+    {
+      "seed": 128000,
+      "phase": "LIQUID",
+      "q4_final": 0.1875,
+      "n_hbonds_final": 162,
+      "t_phys": null,
+      "t_topo_h1": null,
+      "gap_h1": null
+    },
+    {
+      "seed": 128001,
+      "phase": "LIQUID",
+      "q4_final": 0.225,
+      "n_hbonds_final": 141,
+      "t_phys": null,
+      "t_topo_h1": 2840,
+      "gap_h1": null
+    },
+    {
+      "seed": 128002,
+      "phase": "LIQUID",
+      "q4_final": 0.19375,
+      "n_hbonds_final": 154,
+      "t_phys": null,
+      "t_topo_h1": 3560,
+      "gap_h1": null
+    },
+    {
+      "seed": 128003,
+      "phase": "LIQUID",
+      "q4_final": 0.165625,
+      "n_hbonds_final": 155,
+      "t_phys": null,
+      "t_topo_h1": 3000,
+      "gap_h1": null
+    },
+    {
+      "seed": 128004,
+      "phase": "LIQUID",
+      "q4_final": 0.184375,
+      "n_hbonds_final": 154,
+      "t_phys": null,
+      "t_topo_h1": 3360,
+      "gap_h1": null
+    }
+  ]
+}
