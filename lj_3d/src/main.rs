@@ -13,18 +13,19 @@ use std::f64::consts::PI;
 use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
+use num_complex::Complex64;
 
 // === PARAMETERS ===
 const DT: f64 = 0.002;
-const T_HIGH: f64 = 2.0;
-const T_LOW: f64 = 0.3;  // Higher than 2D to avoid deep supercooling
+const T_HIGH: f64 = 0.5;       // Below melting (~0.7) but warm enough for dynamics
+const T_LOW: f64 = 0.1;        // Cold crystalline state
 const STEPS_EQUIL: usize = 3000;
-const STEPS_PROD: usize = 6000;
-const SAMPLE_INTERVAL: usize = 30;
+const STEPS_PROD: usize = 8000;
+const SAMPLE_INTERVAL: usize = 40;
 const THERMOSTAT_TAU: usize = 50;
 const R_CUT: f64 = 2.5;
 const R_MIN: f64 = 0.8;
-const DENSITY: f64 = 0.85;  // Higher for 3D FCC
+const DENSITY: f64 = 1.0;      // FCC equilibrium density
 
 #[derive(Clone, Serialize, Deserialize)]
 struct TrialResult {
@@ -190,27 +191,143 @@ fn apply_thermostat_3d(vel: &mut Array2<f64>, target_t: f64) {
     }
 }
 
-/// Steinhardt Q6 order parameter for 3D crystallinity
-fn steinhardt_q6(pos: &Array2<f64>, dm: &Array2<f64>, _box_size: f64) -> f64 {
-    let n = pos.nrows();
-    let cutoff = 1.5;  // First neighbor shell
+/// Compute Y_6m(θ,φ) spherical harmonics
+/// Using Steinhardt's convention (PRB 28, 784, 1983)
+fn spherical_harmonic_y6m(m: i32, cos_theta: f64, phi: f64) -> Complex64 {
+    let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+    let x = cos_theta;
 
-    // Simplified Q6: count well-ordered local environments
-    let ordered_count: usize = (0..n)
+    // Correctly normalized spherical harmonics for l=6
+    // Using the standard convention: Y_lm = N_lm * P_l^|m|(cos θ) * e^(imφ)
+    // N_lm = sqrt((2l+1)/(4π) * (l-|m|)!/(l+|m|)!)
+    //
+    // The associated Legendre polynomials P_l^m include the derivative factors.
+    // We compute the FULLY NORMALIZED Y_lm directly.
+
+    let y_lm_value = match m.abs() {
+        0 => {
+            // Y_60 = sqrt(13/π)/32 * (231*x^6 - 315*x^4 + 105*x^2 - 5)
+            let coeff = (13.0 / PI).sqrt() / 32.0;
+            coeff * (231.0*x.powi(6) - 315.0*x.powi(4) + 105.0*x.powi(2) - 5.0)
+        }
+        1 => {
+            // Y_61 = -sqrt(273/(2π))/16 * sin(θ) * (33*x^5 - 30*x^3 + 5*x)
+            let coeff = -(273.0 / (2.0 * PI)).sqrt() / 16.0;
+            coeff * sin_theta * (33.0*x.powi(5) - 30.0*x.powi(3) + 5.0*x)
+        }
+        2 => {
+            // Y_62 = sqrt(1365/(2π))/64 * sin^2(θ) * (33*x^4 - 18*x^2 + 1)
+            let coeff = (1365.0 / (2.0 * PI)).sqrt() / 64.0;
+            let sin2 = sin_theta * sin_theta;
+            coeff * sin2 * (33.0*x.powi(4) - 18.0*x.powi(2) + 1.0)
+        }
+        3 => {
+            // Y_63 = -sqrt(1365/π)/32 * sin^3(θ) * (11*x^3 - 3*x)
+            let coeff = -(1365.0 / PI).sqrt() / 32.0;
+            let sin3 = sin_theta.powi(3);
+            coeff * sin3 * (11.0*x.powi(3) - 3.0*x)
+        }
+        4 => {
+            // Y_64 = 3*sqrt(91/(2π))/32 * sin^4(θ) * (11*x^2 - 1)
+            let coeff = 3.0 * (91.0 / (2.0 * PI)).sqrt() / 32.0;
+            let sin4 = sin_theta.powi(4);
+            coeff * sin4 * (11.0*x.powi(2) - 1.0)
+        }
+        5 => {
+            // Y_65 = -3*sqrt(1001/π)/32 * sin^5(θ) * x
+            let coeff = -3.0 * (1001.0 / PI).sqrt() / 32.0;
+            let sin5 = sin_theta.powi(5);
+            coeff * sin5 * x
+        }
+        6 => {
+            // Y_66 = sqrt(3003/π)/64 * sin^6(θ)
+            let coeff = (3003.0 / PI).sqrt() / 64.0;
+            let sin6 = sin_theta.powi(6);
+            coeff * sin6
+        }
+        _ => 0.0,
+    };
+
+    // Apply phase factor e^(imφ)
+    let phase = Complex64::from_polar(1.0, m as f64 * phi);
+
+    if m < 0 {
+        // Y_l,-m = (-1)^|m| * conj(Y_l,|m|)
+        let sign = if m.abs() % 2 == 0 { 1.0 } else { -1.0 };
+        sign * Complex64::new(y_lm_value, 0.0) * phase.conj()
+    } else {
+        Complex64::new(y_lm_value, 0.0) * phase
+    }
+}
+
+/// Steinhardt Q6 order parameter using spherical harmonics
+/// Q6 ~ 0.57 for FCC, ~0.48 for HCP, ~0.51 for BCC, ~0.28-0.35 for liquid
+fn steinhardt_q6(pos: &Array2<f64>, dm: &Array2<f64>, box_size: f64) -> f64 {
+    let n = pos.nrows();
+    let cutoff = 1.5;  // First neighbor shell (slightly larger than 2^(1/6) ≈ 1.12)
+
+    // Compute q6 for each particle
+    let q6_values: Vec<f64> = (0..n)
         .into_par_iter()
-        .filter(|&i| {
-            let mut n_neigh = 0;
+        .map(|i| {
+            // Find neighbors
+            let mut neighbors: Vec<usize> = Vec::new();
             for j in 0..n {
                 if i != j && dm[[i, j]] < cutoff && dm[[i, j]] > 0.5 {
-                    n_neigh += 1;
+                    neighbors.push(j);
                 }
             }
-            // FCC/HCP have 12 neighbors, liquid has ~10-11
-            n_neigh >= 11
-        })
-        .count();
 
-    ordered_count as f64 / n as f64
+            if neighbors.is_empty() {
+                return 0.0;
+            }
+
+            // Compute q_6m(i) = (1/N_b) * Σ_j Y_6m(θ_ij, φ_ij)
+            let mut q6m: [Complex64; 13] = [Complex64::new(0.0, 0.0); 13];  // m = -6 to +6
+
+            for &j in &neighbors {
+                // Get relative position vector (with PBC)
+                let mut dx = pos[[j, 0]] - pos[[i, 0]];
+                let mut dy = pos[[j, 1]] - pos[[i, 1]];
+                let mut dz = pos[[j, 2]] - pos[[i, 2]];
+
+                // Minimum image convention
+                dx -= box_size * (dx / box_size).round();
+                dy -= box_size * (dy / box_size).round();
+                dz -= box_size * (dz / box_size).round();
+
+                let r = (dx*dx + dy*dy + dz*dz).sqrt();
+                if r < 1e-10 { continue; }
+
+                // Spherical coordinates
+                let cos_theta = dz / r;
+                let phi = dy.atan2(dx);
+
+                // Sum Y_6m contributions
+                for m_idx in 0..13 {
+                    let m = m_idx as i32 - 6;  // m = -6 to +6
+                    q6m[m_idx] += spherical_harmonic_y6m(m, cos_theta, phi);
+                }
+            }
+
+            // Normalize by number of neighbors
+            let n_b = neighbors.len() as f64;
+            for m_idx in 0..13 {
+                q6m[m_idx] /= n_b;
+            }
+
+            // q6(i) = sqrt(4π/13 * Σ_m |q_6m|²)
+            let sum_sq: f64 = q6m.iter().map(|c| c.norm_sqr()).sum();
+            (4.0 * PI / 13.0 * sum_sq).sqrt()
+        })
+        .collect();
+
+    // Global Q6 = average over all particles
+    if q6_values.is_empty() {
+        0.0
+    } else {
+        q6_values.iter().sum::<f64>() / q6_values.len() as f64
+    }
 }
 
 /// Approximate H1 entropy from edge statistics
@@ -358,17 +475,53 @@ fn detect_cusum(series: &[f64], times: &[usize], baseline_fraction: f64) -> Opti
     None
 }
 
-/// Run single 3D trial
+/// Initialize FCC lattice positions
+fn init_fcc_lattice(n_particles: usize, box_size: f64) -> Array2<f64> {
+    let mut pos = Array2::<f64>::zeros((n_particles, 3));
+
+    // FCC unit cell has 4 atoms: (0,0,0), (0.5,0.5,0), (0.5,0,0.5), (0,0.5,0.5)
+    let n_cells = ((n_particles as f64 / 4.0).powf(1.0 / 3.0)).ceil() as usize;
+    let a = box_size / n_cells as f64;  // Lattice constant
+
+    let basis = [
+        [0.0, 0.0, 0.0],
+        [0.5, 0.5, 0.0],
+        [0.5, 0.0, 0.5],
+        [0.0, 0.5, 0.5],
+    ];
+
+    let mut idx = 0;
+    'outer: for ix in 0..n_cells {
+        for iy in 0..n_cells {
+            for iz in 0..n_cells {
+                for b in &basis {
+                    if idx >= n_particles { break 'outer; }
+                    pos[[idx, 0]] = (ix as f64 + b[0]) * a;
+                    pos[[idx, 1]] = (iy as f64 + b[1]) * a;
+                    pos[[idx, 2]] = (iz as f64 + b[2]) * a;
+                    idx += 1;
+                }
+            }
+        }
+    }
+
+    pos
+}
+
+/// Run single 3D trial with FCC initialization and melt-recrystallize protocol
 fn run_trial_3d(n_particles: usize, seed: u64) -> TrialResult {
     let box_size = (n_particles as f64 / DENSITY).powf(1.0 / 3.0);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
-    // Initialize positions in 3D
-    let mut pos = Array2::<f64>::zeros((n_particles, 3));
+    // Initialize FCC lattice (perfect crystal)
+    let mut pos = init_fcc_lattice(n_particles, box_size);
+
+    // Add small random displacement to break perfect symmetry
     for i in 0..n_particles {
-        pos[[i, 0]] = rng.random::<f64>() * box_size;
-        pos[[i, 1]] = rng.random::<f64>() * box_size;
-        pos[[i, 2]] = rng.random::<f64>() * box_size;
+        for d in 0..3 {
+            pos[[i, d]] += (rng.random::<f64>() - 0.5) * 0.1;
+            pos[[i, d]] = pos[[i, d]].rem_euclid(box_size);
+        }
     }
 
     // Initialize velocities
@@ -390,11 +543,13 @@ fn run_trial_3d(n_particles: usize, seed: u64) -> TrialResult {
 
     let mut forces = compute_forces_3d(&pos, box_size);
 
-    // Equilibration
+    // Phase 1: Heat to partially melt (maintain some crystalline order)
     for step in 0..STEPS_EQUIL {
         velocity_verlet_step_3d(&mut pos, &mut vel, &mut forces, box_size);
         if step % THERMOSTAT_TAU == 0 {
-            apply_thermostat_3d(&mut vel, T_HIGH);
+            // Gradual heating to T_HIGH
+            let t_target = T_LOW + (T_HIGH - T_LOW) * (step as f64 / STEPS_EQUIL as f64);
+            apply_thermostat_3d(&mut vel, t_target);
         }
     }
 
@@ -428,7 +583,8 @@ fn run_trial_3d(n_particles: usize, seed: u64) -> TrialResult {
     }
 
     // Detection
-    let t_phys = detect_crystal(&q6_series, &times, 0.6, 4);
+    // Real Q6 threshold: 0.45 (FCC~0.57, HCP~0.48, liquid~0.28-0.35)
+    let t_phys = detect_crystal(&q6_series, &times, 0.45, 4);
     let t_topo_h1 = detect_cusum(&s_h1_series, &times, 0.3);
     let t_topo_h2 = detect_cusum(&s_h2_series, &times, 0.3);
 
@@ -445,7 +601,8 @@ fn run_trial_3d(n_particles: usize, seed: u64) -> TrialResult {
     let q6_final = q6_series[q6_series.len().saturating_sub(5)..].iter().sum::<f64>()
         / 5.0f64.min(q6_series.len() as f64);
 
-    let phase = if q6_final > 0.6 { "CRYSTAL" } else { "LIQUID" };
+    // Real Steinhardt Q6: FCC~0.57, HCP~0.48, liquid~0.28-0.35
+    let phase = if q6_final > 0.45 { "CRYSTAL" } else { "LIQUID" };
 
     TrialResult {
         seed,

@@ -9,9 +9,11 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::f64::consts::PI;
 use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
+use num_complex::Complex64;
 
 // === KOB-ANDERSEN PARAMETERS ===
 // Standard parameters from Kob & Andersen, PRE 51, 4626 (1995)
@@ -279,32 +281,132 @@ fn rescale_velocities(vel: &mut Array2<f64>, target_t: f64) {
     }
 }
 
-/// Compute Q6-like order parameter (bond-orientational order)
-fn compute_q6(dm: &Array2<f64>, types: &[u8]) -> f64 {
-    let n = dm.nrows();
-    // For glass: look at local structure around A particles
-    let cutoff = 1.5;  // First neighbor shell
+/// Spherical harmonics Y_lm for l=6
+/// Using explicit formulas for computational efficiency
+fn spherical_harmonic_y6m(m: i32, cos_theta: f64, phi: f64) -> Complex64 {
+    let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+    let x = cos_theta;
 
-    let ordered_count: usize = (0..n)
-        .filter(|&i| types[i] == 0)  // Only A particles
-        .filter(|&i| {
-            let mut n_neigh = 0;
+    // Correctly normalized spherical harmonics for l=6
+    // Using the standard convention: Y_lm = N_lm * P_l^|m|(cos θ) * e^(imφ)
+    // N_lm = sqrt((2l+1)/(4π) * (l-|m|)!/(l+|m|)!)
+    //
+    // The associated Legendre polynomials P_l^m include the derivative factors.
+    // We compute the FULLY NORMALIZED Y_lm directly.
+
+    let y_lm_value = match m.abs() {
+        0 => {
+            // Y_60 = sqrt(13/π)/32 * (231*x^6 - 315*x^4 + 105*x^2 - 5)
+            let coeff = (13.0 / PI).sqrt() / 32.0;
+            coeff * (231.0*x.powi(6) - 315.0*x.powi(4) + 105.0*x.powi(2) - 5.0)
+        }
+        1 => {
+            // Y_61 = -sqrt(273/(2π))/16 * sin(θ) * (33*x^5 - 30*x^3 + 5*x)
+            let coeff = -(273.0 / (2.0 * PI)).sqrt() / 16.0;
+            coeff * sin_theta * (33.0*x.powi(5) - 30.0*x.powi(3) + 5.0*x)
+        }
+        2 => {
+            // Y_62 = sqrt(1365/(2π))/64 * sin^2(θ) * (33*x^4 - 18*x^2 + 1)
+            let coeff = (1365.0 / (2.0 * PI)).sqrt() / 64.0;
+            let sin2 = sin_theta * sin_theta;
+            coeff * sin2 * (33.0*x.powi(4) - 18.0*x.powi(2) + 1.0)
+        }
+        3 => {
+            // Y_63 = -sqrt(1365/π)/32 * sin^3(θ) * (11*x^3 - 3*x)
+            let coeff = -(1365.0 / PI).sqrt() / 32.0;
+            let sin3 = sin_theta.powi(3);
+            coeff * sin3 * (11.0*x.powi(3) - 3.0*x)
+        }
+        4 => {
+            // Y_64 = 3*sqrt(91/(2π))/32 * sin^4(θ) * (11*x^2 - 1)
+            let coeff = 3.0 * (91.0 / (2.0 * PI)).sqrt() / 32.0;
+            let sin4 = sin_theta.powi(4);
+            coeff * sin4 * (11.0*x.powi(2) - 1.0)
+        }
+        5 => {
+            // Y_65 = -3*sqrt(1001/π)/32 * sin^5(θ) * x
+            let coeff = -3.0 * (1001.0 / PI).sqrt() / 32.0;
+            let sin5 = sin_theta.powi(5);
+            coeff * sin5 * x
+        }
+        6 => {
+            // Y_66 = sqrt(3003/π)/64 * sin^6(θ)
+            let coeff = (3003.0 / PI).sqrt() / 64.0;
+            let sin6 = sin_theta.powi(6);
+            coeff * sin6
+        }
+        _ => 0.0,
+    };
+
+    // Apply phase factor e^(imφ)
+    let phase = Complex64::from_polar(1.0, m as f64 * phi);
+
+    if m < 0 {
+        // Y_l,-m = (-1)^|m| * conj(Y_l,|m|)
+        let sign = if m.abs() % 2 == 0 { 1.0 } else { -1.0 };
+        sign * Complex64::new(y_lm_value, 0.0) * phase.conj()
+    } else {
+        Complex64::new(y_lm_value, 0.0) * phase
+    }
+}
+
+/// Steinhardt Q6 order parameter using spherical harmonics
+/// Q6 ~ 0.57 for FCC, ~0.48 for HCP, ~0.28-0.35 for liquid/glass
+fn compute_q6(pos: &Array2<f64>, dm: &Array2<f64>, box_size: f64, _types: &[u8]) -> f64 {
+    let n = pos.nrows();
+    let cutoff = 1.5;
+
+    let q6_values: Vec<f64> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let mut neighbors: Vec<usize> = Vec::new();
             for j in 0..n {
                 if i != j && dm[[i, j]] < cutoff && dm[[i, j]] > 0.5 {
-                    n_neigh += 1;
+                    neighbors.push(j);
                 }
             }
-            // Crystal: very regular coordination
-            // Glass: variable coordination
-            n_neigh >= 11 && n_neigh <= 13
-        })
-        .count();
 
-    let n_a = types.iter().filter(|&&t| t == 0).count();
-    if n_a > 0 {
-        ordered_count as f64 / n_a as f64
-    } else {
+            if neighbors.is_empty() {
+                return 0.0;
+            }
+
+            let mut q6m: [Complex64; 13] = [Complex64::new(0.0, 0.0); 13];
+
+            for &j in &neighbors {
+                let mut dx = pos[[j, 0]] - pos[[i, 0]];
+                let mut dy = pos[[j, 1]] - pos[[i, 1]];
+                let mut dz = pos[[j, 2]] - pos[[i, 2]];
+
+                dx -= box_size * (dx / box_size).round();
+                dy -= box_size * (dy / box_size).round();
+                dz -= box_size * (dz / box_size).round();
+
+                let r = (dx*dx + dy*dy + dz*dz).sqrt();
+                if r < 1e-10 { continue; }
+
+                let cos_theta = dz / r;
+                let phi = dy.atan2(dx);
+
+                for m_idx in 0..13 {
+                    let m = m_idx as i32 - 6;
+                    q6m[m_idx] += spherical_harmonic_y6m(m, cos_theta, phi);
+                }
+            }
+
+            let n_b = neighbors.len() as f64;
+            for m_idx in 0..13 {
+                q6m[m_idx] /= n_b;
+            }
+
+            let sum_sq: f64 = q6m.iter().map(|c| c.norm_sqr()).sum();
+            (4.0 * PI / 13.0 * sum_sq).sqrt()
+        })
+        .collect();
+
+    if q6_values.is_empty() {
         0.0
+    } else {
+        q6_values.iter().sum::<f64>() / q6_values.len() as f64
     }
 }
 
@@ -559,7 +661,7 @@ fn run_trial_glass(n_particles: usize, seed: u64, quench: &QuenchConfig) -> Tria
             pos_prev.assign(&pos);
 
             let dm = compute_distance_matrix(&pos, box_size);
-            let q6 = compute_q6(&dm, &types);
+            let q6 = compute_q6(&pos, &dm, box_size, &types);
             let msd = compute_msd(&pos_unwrap, &pos_ref, box_size);
             let s_h1 = persistence_entropy_h1(&dm);
 
@@ -599,11 +701,11 @@ fn run_trial_glass(n_particles: usize, seed: u64, quench: &QuenchConfig) -> Tria
         0.0
     };
 
-    // Classification:
-    // - Glass: low Q6 (< 0.5), low MSD (< 1.0), low D
-    // - Crystal: high Q6 (> 0.7)
-    // - Liquid: high MSD, high D
-    let phase = if q6_final > 0.7 {
+    // Classification using real Steinhardt Q6:
+    // - Crystal (FCC/HCP): Q6 > 0.45 (FCC~0.57, HCP~0.48)
+    // - Liquid: Q6 ~ 0.28-0.35, high MSD, high D
+    // - Glass: Q6 ~ 0.28-0.35, low MSD (< 1.0), low D (dynamical arrest)
+    let phase = if q6_final > 0.45 {
         "CRYSTAL"
     } else if msd_final < 1.0 && diffusion_coeff < 0.01 {
         "GLASS"

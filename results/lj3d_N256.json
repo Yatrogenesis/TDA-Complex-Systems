@@ -1,63 +1,63 @@
 {
   "n_particles": 256,
   "n_trials": 5,
-  "total_time_sec": 13.8056579,
-  "time_per_trial_sec": 2.76113158,
+  "total_time_sec": 14.6393453,
+  "time_per_trial_sec": 2.92786906,
   "n_crystal": 5,
   "precursor_rate_h1": 0.0,
   "precursor_rate_h2": 0.0,
-  "mean_gap_h1": -2088.0,
-  "mean_gap_h2": -2670.0,
+  "mean_gap_h1": -2560.0,
+  "mean_gap_h2": -2904.0,
   "trials": [
     {
       "seed": 25600,
       "phase": "CRYSTAL",
-      "q6_final": 0.93203125,
+      "q6_final": 0.5585979830321869,
       "t_phys": 0,
-      "t_topo_h1": 2370,
-      "t_topo_h2": 2340,
-      "gap_h1": -2370,
-      "gap_h2": -2340
+      "t_topo_h1": 2560,
+      "t_topo_h2": 2840,
+      "gap_h1": -2560,
+      "gap_h2": -2840
     },
     {
       "seed": 25601,
       "phase": "CRYSTAL",
-      "q6_final": 0.94921875,
+      "q6_final": 0.5606519023635601,
       "t_phys": 0,
-      "t_topo_h1": 1830,
-      "t_topo_h2": 4590,
-      "gap_h1": -1830,
-      "gap_h2": -4590
+      "t_topo_h1": 2480,
+      "t_topo_h2": 3480,
+      "gap_h1": -2480,
+      "gap_h2": -3480
     },
     {
       "seed": 25602,
       "phase": "CRYSTAL",
-      "q6_final": 0.96875,
+      "q6_final": 0.559456463037092,
       "t_phys": 0,
-      "t_topo_h1": 1920,
-      "t_topo_h2": 2070,
-      "gap_h1": -1920,
-      "gap_h2": -2070
+      "t_topo_h1": 2520,
+      "t_topo_h2": 2920,
+      "gap_h1": -2520,
+      "gap_h2": -2920
     },
     {
       "seed": 25603,
       "phase": "CRYSTAL",
-      "q6_final": 0.96640625,
+      "q6_final": 0.5593458755117201,
       "t_phys": 0,
-      "t_topo_h1": 2040,
-      "t_topo_h2": 1980,
-      "gap_h1": -2040,
-      "gap_h2": -1980
+      "t_topo_h1": 2520,
+      "t_topo_h2": 2520,
+      "gap_h1": -2520,
+      "gap_h2": -2520
     },
     {
       "seed": 25604,
       "phase": "CRYSTAL",
-      "q6_final": 0.9453125,
+      "q6_final": 0.5601853090364208,
       "t_phys": 0,
-      "t_topo_h1": 2280,
-      "t_topo_h2": 2370,
-      "gap_h1": -2280,
-      "gap_h2": -2370
+      "t_topo_h1": 2720,
+      "t_topo_h2": 2760,
+      "gap_h1": -2720,
+      "gap_h2": -2760
     }
   ]
 }

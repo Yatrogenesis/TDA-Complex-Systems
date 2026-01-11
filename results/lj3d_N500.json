@@ -1,43 +1,43 @@
 {
   "n_particles": 500,
   "n_trials": 3,
-  "total_time_sec": 28.3466157,
-  "time_per_trial_sec": 9.4488719,
+  "total_time_sec": 29.1194682,
+  "time_per_trial_sec": 9.7064894,
   "n_crystal": 3,
   "precursor_rate_h1": 0.0,
   "precursor_rate_h2": 0.0,
-  "mean_gap_h1": -2010.0,
-  "mean_gap_h2": -2330.0,
+  "mean_gap_h1": -2640.0,
+  "mean_gap_h2": -2440.0,
   "trials": [
     {
       "seed": 50000,
       "phase": "CRYSTAL",
-      "q6_final": 0.9596,
+      "q6_final": 0.5593277384740373,
       "t_phys": 0,
-      "t_topo_h1": 1860,
-      "t_topo_h2": 2160,
-      "gap_h1": -1860,
-      "gap_h2": -2160
+      "t_topo_h1": 2800,
+      "t_topo_h2": null,
+      "gap_h1": -2800,
+      "gap_h2": null
     },
     {
       "seed": 50001,
       "phase": "CRYSTAL",
-      "q6_final": 0.9452,
+      "q6_final": 0.560880596686931,
       "t_phys": 0,
-      "t_topo_h1": 2100,
-      "t_topo_h2": 2610,
-      "gap_h1": -2100,
-      "gap_h2": -2610
+      "t_topo_h1": 2480,
+      "t_topo_h2": null,
+      "gap_h1": -2480,
+      "gap_h2": null
     },
     {
       "seed": 50002,
       "phase": "CRYSTAL",
-      "q6_final": 0.944,
+      "q6_final": 0.5601301051656794,
       "t_phys": 0,
-      "t_topo_h1": 2070,
-      "t_topo_h2": 2220,
-      "gap_h1": -2070,
-      "gap_h2": -2220
+      "t_topo_h1": 2640,
+      "t_topo_h2": 2440,
+      "gap_h1": -2640,
+      "gap_h2": -2440
     }
   ]
 }
