@@ -2,8 +2,10 @@
 name = "lj_glass_tda"
 version = "0.1.0"
 edition = "2021"
-authors = ["Francisco Molina Burgos"]
-description = "LJ Glass-forming system - TDA during vitrification"
+authors = ["Francisco Molina-Burgos <fmolina@avermex.com>"]
+description = "Kob-Andersen glass-forming mixture with variable quench rate study"
+license = "MIT"
+repository = "https://github.com/Yatrogenesis/TDA-Complex-Systems"
 
 [dependencies]
 ndarray = { version = "0.16", features = ["rayon"] }

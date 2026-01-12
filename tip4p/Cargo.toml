@@ -2,8 +2,10 @@
 name = "tip4p_tda"
 version = "0.1.0"
 edition = "2021"
-authors = ["Francisco Molina Burgos"]
-description = "TIP4P Water ice nucleation - TDA with H-bond topology"
+authors = ["Francisco Molina-Burgos <fmolina@avermex.com>"]
+description = "TIP4P/2005 water model with SHAKE constraints and Wolf electrostatics"
+license = "MIT"
+repository = "https://github.com/Yatrogenesis/TDA-Complex-Systems"
 
 [dependencies]
 ndarray = { version = "0.16", features = ["rayon"] }

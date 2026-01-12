@@ -2,8 +2,10 @@
 name = "lj3d_tda"
 version = "0.1.0"
 edition = "2021"
-authors = ["Francisco Molina Burgos"]
-description = "3D Lennard-Jones TDA-CUSUM with H1+H2 homology"
+authors = ["Francisco Molina-Burgos <fmolina@avermex.com>"]
+description = "3D Lennard-Jones TDA-CUSUM with H1+H2 homology and Steinhardt Q6"
+license = "MIT"
+repository = "https://github.com/Yatrogenesis/TDA-Complex-Systems"
 
 [dependencies]
 ndarray = { version = "0.16", features = ["rayon"] }
