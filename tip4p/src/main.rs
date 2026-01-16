@@ -4,10 +4,12 @@
 //! Author: Francisco Molina Burgos
 //! Date: 2026-01-10
 
+// Allow unused constants - these document the physical model
+#![allow(dead_code)]
+
 use ndarray::Array2;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
@@ -288,7 +290,7 @@ fn compute_forces(molecules: &mut [WaterMolecule], box_size: f64) -> f64 {
                         let r2 = pbc_dist2(ri, rj, box_size);
                         if r2 < R_CUT2 && r2 > 0.01 {
                             let r = r2.sqrt();
-                            let (pe, f_mag) = wolf_coulomb(r, *qi, *qj);
+                            let (pe, _f_mag) = wolf_coulomb(r, *qi, *qj);
                             total_pe += pe * 0.01;  // Scale for stability
 
                             // Distribute forces to atoms
