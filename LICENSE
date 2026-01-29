@@ -1,21 +1,87 @@
-MIT License
+AVERMEX ACADEMIC + COMMERCIAL LICENSE v1.0
+==========================================
 
 Copyright (c) 2026 Francisco Molina-Burgos
+Avermex Research Division, Mérida, Yucatán, México
+Contact: fmolina@avermex.com
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+TERMS AND CONDITIONS
+--------------------
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. DEFINITIONS
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+   "Academic Use" means use by accredited educational institutions,
+   universities, research institutes, and individual researchers for
+   non-commercial research, teaching, and scholarly publication.
+
+   "Commercial Use" means any use that is primarily intended for or
+   directed toward commercial advantage or monetary compensation.
+
+   "Derivative Work" means any work that is based on or derived from
+   this software.
+
+2. ACADEMIC USE LICENSE (FREE)
+
+   Permission is hereby granted, free of charge, to any Academic User
+   to use, copy, modify, and distribute this software and its
+   documentation for Academic Use, subject to the following conditions:
+
+   a) The above copyright notice and this license shall be included
+      in all copies or substantial portions of the software.
+
+   b) Academic publications using this software must cite the original
+      work appropriately.
+
+   c) The software is provided "AS IS" without warranty of any kind.
+
+3. COMMERCIAL USE LICENSE (PAID OR COPYLEFT)
+
+   Commercial Users have TWO options:
+
+   OPTION A - COMMERCIAL LICENSE:
+   Contact fmolina@avermex.com for commercial licensing terms.
+
+   OPTION B - COPYLEFT (AGPL-style):
+   Commercial Users may use this software for free IF AND ONLY IF:
+
+   a) ALL Derivative Works are released under this same license.
+
+   b) Complete source code of ALL Derivative Works is made publicly
+      available within 30 days of deployment or distribution.
+
+   c) Users of your service/product are informed of their right to
+      obtain the source code.
+
+   d) No additional restrictions are imposed on recipients.
+
+4. PROHIBITED USES
+
+   The following uses are explicitly prohibited without a Commercial License:
+
+   a) Incorporation into proprietary/closed-source products
+   b) Use in commercial SaaS offerings without source disclosure
+   c) Resale or sublicensing
+   d) Use by for-profit entities without compliance with Section 3
+
+5. ATTRIBUTION
+
+   All uses must maintain attribution to:
+   Francisco Molina-Burgos, Avermex Research Division
+
+6. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR
+   ANY CLAIM, DAMAGES OR OTHER LIABILITY.
+
+7. TERMINATION
+
+   This license terminates automatically upon any breach of its terms.
+
+---
+
+For commercial licensing inquiries:
+Email: fmolina@avermex.com
+Web: https://avermex.com
+
+SPDX-License-Identifier: LicenseRef-Avermex-Academic-Commercial-1.0
