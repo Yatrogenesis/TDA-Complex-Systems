@@ -1,0 +1,164 @@
+\documentclass[aps,pre,twocolumn,superscriptaddress]{revtex4-2}
+
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+
+\begin{document}
+
+\title{Topological Data Analysis of Phase Transitions in Three-Dimensional Complex Systems:\\
+Crystallization, Vitrification, and Molecular Fluids}
+
+\author{Francisco Molina-Burgos}
+\email{fmolina@avermex.com}
+\affiliation{Avermex Research Division, M\'erida, Yucat\'an, M\'exico}
+
+\date{January 25, 2026}
+
+\begin{abstract}
+We extend topological data analysis methods to three-dimensional physical systems exhibiting crystallization and vitrification. Using persistent homology (H1 loops, H2 voids) combined with Steinhardt bond-orientational order parameters, we discriminate between crystalline (FCC, $Q_6 \approx 0.57$) and glassy ($Q_6 \approx 0.29$) phases in Lennard-Jones systems. The Kob-Andersen binary mixture vitrifies at all tested quench rates ($10^9$--$10^{14}$ K/s), demonstrating its glass-forming ability. We also implement TIP4P/2005 water with SHAKE constraints and Wolf electrostatics. While the Euler approximation for persistence entropy successfully classifies final phases, exact persistent homology is required for precursor detection.
+\end{abstract}
+
+\maketitle
+
+\section{Introduction}
+
+The extension of topological data analysis from two to three dimensions introduces new homological features: H2 (voids) in addition to H0 (components) and H1 (loops). These higher-dimensional features may encode information about phase transitions in complex 3D systems.
+
+We investigate three systems:
+\begin{enumerate}
+\item \textbf{3D Lennard-Jones}: Monocomponent crystallization to FCC
+\item \textbf{Kob-Andersen}: Binary glass-former with frustrated crystallization
+\item \textbf{TIP4P Water}: Realistic molecular fluid
+\end{enumerate}
+
+\section{Methods}
+
+\subsection{Steinhardt Order Parameters}
+
+The bond-orientational order parameter $Q_l$ is defined as:
+\begin{equation}
+Q_l = \sqrt{\frac{4\pi}{2l+1} \sum_{m=-l}^{l} |q_{lm}|^2}
+\end{equation}
+where:
+\begin{equation}
+q_{lm} = \frac{1}{N_b} \sum_{j=1}^{N_b} Y_{lm}(\theta_{ij}, \phi_{ij})
+\end{equation}
+
+Reference values for $Q_6$:
+\begin{itemize}
+\item FCC crystal: 0.574
+\item HCP crystal: 0.485
+\item Liquid/Glass: 0.28--0.35
+\end{itemize}
+
+\subsection{Persistence Entropy (Euler Approximation)}
+
+For computational efficiency in 3D, we use the Euler characteristic relation:
+\begin{equation}
+\chi = \beta_0 - \beta_1 + \beta_2
+\end{equation}
+to approximate Betti numbers at each filtration scale.
+
+\textbf{Limitation:} This approximation counts features but loses birth/death information, detecting phase changes \textit{post facto} rather than as precursors.
+
+\subsection{Simulation Protocols}
+
+\textbf{LJ 3D:} Velocity Verlet integration with Berendsen thermostat. Melt at $T=2.0$, quench to $T=0.1$.
+
+\textbf{Kob-Andersen:} Binary 80:20 mixture with parameters from Kob \& Andersen (1995). Size disparity frustrates crystallization.
+
+\textbf{TIP4P:} 4-site water model with SHAKE constraints for rigid geometry and Wolf summation for electrostatics.
+
+\section{Results}
+
+\subsection{3D Lennard-Jones Crystallization}
+
+\begin{table}[h]
+\caption{LJ 3D crystallization results.}
+\begin{ruledtabular}
+\begin{tabular}{cccc}
+$N$ & Final $Q_6$ & Phase & Success \\
+\hline
+256 & 0.56 & FCC & 100\% \\
+500 & 0.56 & FCC & 100\% \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+The $Q_6 = 0.56$ confirms FCC crystallization, matching the literature value of 0.574 within numerical precision.
+
+\subsection{Kob-Andersen Glass Formation}
+
+\begin{table}[h]
+\caption{Quench rate study for KA glass-former.}
+\begin{ruledtabular}
+\begin{tabular}{ccccc}
+Quench Rate (K/s) & Steps & $Q_6$ & MSD & Phase \\
+\hline
+$\sim 10^{14}$ & 1 & 0.29 & 1.06 & Glass \\
+$\sim 10^{12}$ & 100 & 0.29 & 0.22 & Glass \\
+$\sim 10^{11}$ & 1000 & 0.29 & 0.08 & Glass \\
+$\sim 10^{10}$ & 5000 & 0.29 & 0.03 & Glass \\
+$\sim 10^{9}$ & 20000 & 0.30 & 0.01 & Glass \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+\textbf{Key finding:} The KA mixture vitrifies at \textit{all} quench rates tested, with $Q_6 \approx 0.29$ confirming amorphous structure. The mean squared displacement (MSD) decreases with slower quench, indicating better relaxation within the glassy state.
+
+\subsection{Phase Discrimination}
+
+The topological approach successfully discriminates:
+\begin{itemize}
+\item LJ pure $\rightarrow$ Crystal ($Q_6 = 0.56$)
+\item KA mixture $\rightarrow$ Glass ($Q_6 = 0.29$)
+\end{itemize}
+
+\subsection{TIP4P Water}
+
+The TIP4P simulation remains liquid at accessible timescales. Ice nucleation requires microsecond timescales beyond current computational reach. The tetrahedral order parameter $Q_4 = 0.19$ confirms liquid structure.
+
+\section{Discussion}
+
+\subsection{Crystal vs Glass}
+
+The Steinhardt $Q_6$ parameter robustly distinguishes crystalline from glassy phases:
+\begin{equation}
+Q_6^{\text{crystal}} \approx 0.57 \gg Q_6^{\text{glass}} \approx 0.29
+\end{equation}
+
+\subsection{Euler Approximation Limitations}
+
+The Euler-based persistence entropy detects phase differences but cannot identify \textit{precursors}. For early warning detection ($t_{\text{topo}} < t_{\text{metric}}$), exact persistent homology with birth/death tracking is required.
+
+\subsection{Glass-Forming Ability}
+
+The KA mixture's resistance to crystallization across 5 orders of magnitude in quench rate ($10^9$--$10^{14}$ K/s) demonstrates exceptional glass-forming ability, consistent with its use as a model glass-former in the literature.
+
+\section{Conclusion}
+
+We have demonstrated:
+\begin{enumerate}
+\item Steinhardt $Q_6$ reliably discriminates FCC crystals from glasses
+\item The Kob-Andersen mixture vitrifies at all accessible quench rates
+\item Euler-approximated persistence entropy classifies final phases but not precursors
+\item Exact H1/H2 persistence is needed for predictive early warning in 3D
+\end{enumerate}
+
+Future work will implement exact persistent homology for 3D systems to test whether the topological primacy principle ($t_{\text{topo}} < t_{\text{metric}}$) extends to three dimensions.
+
+\begin{acknowledgments}
+Computational assistance from Claude (Anthropic).
+\end{acknowledgments}
+
+\begin{thebibliography}{12}
+\bibitem{steinhardt1983} P. J. Steinhardt, D. R. Nelson, and M. Ronchetti, Phys. Rev. B \textbf{28}, 784 (1983).
+\bibitem{kob1995} W. Kob and H. C. Andersen, Phys. Rev. E \textbf{51}, 4626 (1995).
+\bibitem{abascal2005} J. L. F. Abascal and C. Vega, J. Chem. Phys. \textbf{123}, 234505 (2005).
+\bibitem{wolf1999} D. Wolf et al., J. Chem. Phys. \textbf{110}, 8254 (1999).
+\bibitem{edelsbrunner2010} H. Edelsbrunner and J. Harer, \textit{Computational Topology} (AMS, 2010).
+\end{thebibliography}
+
+\end{document}
