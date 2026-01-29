@@ -2,6 +2,7 @@
 
 **Topological Data Analysis of Phase Transitions in Complex Physical Systems**
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18408156.svg)](https://doi.org/10.5281/zenodo.18408156)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
 
@@ -44,6 +45,8 @@ For **precursor detection** (t_CUSUM < t_physical), use exact persistent homolog
 - FCC crystal: 0.574
 - HCP crystal: 0.485
 - Liquid/Glass: 0.28-0.35
+
+\* TIP4P remains liquid (ice nucleation requires microseconds)
 
 \* TIP4P remains liquid (ice nucleation requires microseconds)
 
